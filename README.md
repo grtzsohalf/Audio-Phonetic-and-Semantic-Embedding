@@ -1,9 +1,5 @@
 ## Note: Upgraded to TF 1.6
 
-This is the implementation of the paper: [Towards Unsupervised Automatic Speech
-Recognition Trained by Unaligned Speech and Text
-only](https://arxiv.org/abs/1803.10952).
-
 # Stage One: Disentangle
 
 Specify the paths in the `path.sh`.
@@ -23,7 +19,7 @@ To train the stage two, `cd` into `stage_2_semantic` and run `./train.sh
 [options]`.
 To produce semantic embeddings, `cd` into `stage_2_semantic` and run `./test.sh [options]`.
 
-# Stage Three: Transform
+# Parallelizing
 
 Given two kinds of embeddings, this module is to transform one embedding to the
 other.
@@ -42,10 +38,3 @@ Translation](https://arxiv.org/abs/1801.06126).
 + `audio2text_ICP.py` and `convert_train.py` belong to the second approach.
 
 To train, please refer to the training example: `../ICP_train.sh`.
-
-# Evaluation of Semantic Embeddings
-
-This is modified from [github](https://github.com/kudkudak/word-embeddings-benchmarks).
-
-To run evalution, `cd` into `word-embeddings-benchmarks` and run `python
-evaluate_correlation_on_all.py [options]`.
