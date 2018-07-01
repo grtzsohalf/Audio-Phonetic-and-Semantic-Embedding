@@ -2,7 +2,6 @@
 
 import audio2text_ICP as ICP
 import data_parser as dp
-import sys
 import argparse
 from sklearn.decomposition import PCA
 import numpy as np
@@ -20,21 +19,7 @@ def find_pair(x, Y):
     Return:
       The indice of the closest Y to the vector x
     '''
-    return np.argmin(np.linalg.norm(x-Y, axis=1))
-
-
-def find_top_N(x, Y, N=10):
-    '''
-    Args:
-      x: the comparing feature, shape = [FEAT_DIM]
-      Y: the feature data to be compaired shape = [NUM, FEAT_DIM]
-      N: the number of the top N selection
-    Returns:
-      top_N: N args, shape = [N]
-    '''
-    norm = np.linalg.norm(x-Y, axis=1)
-    top_N = np.argsort(norm)[-10:][::-1]
-    return top_N
+    return np.argmax(np.linalg.norm(x-Y, axis=1))
 
 
 def gen_batch(embed):
@@ -43,7 +28,6 @@ def gen_batch(embed):
     while True:
         start = cnt * FLAG.mb
         end = (cnt+1) * FLAG.mb
-        cnt += 1
         yield embed[start:end]
 
         if cnt >= max_cnt:
@@ -57,54 +41,17 @@ def generate_pair(X, Y):
     return y_
 
 
-def generate_pair_list(X, Y):
+def generate_pair_map(X, Y):
     m = []
     for i, x in enumerate(X):
-        m.append(find_top_N(x, Y, 10))
+        m.append(find_pair(x, Y))
     return m
-
-
-def print_loss(start_losses, end_losses, iter_num):
-    if iter_num == 0:
-        print('\n\n\n\n\n')
-    sys.stdout.write('\033[F'*6)
-    print('iter {}:'.format(iter_num+1))
-    header = ('T_LOSS', 't2a', 'a2t', 't2a2t', 'a2t2a')
-
-    str_fmt = '{0: ^10}|{1: ^10}|{2: ^10}|{3: ^10}|{4: ^10}'
-    loss_fmt = '{0: ^10.6f}|{1: ^10.6f}|{2: ^10.6f}|{3: ^10.6f}|{4: ^10.6f}'
-
-    print(str_fmt.format(*header))
-    print('Start Loss:')
-    loss = (i for i in start_losses)
-    print(loss_fmt.format(*loss))
-    print('End Loss:')
-    loss = (i for i in end_losses)
-    print(loss_fmt.format(*loss))
-    return
-
-
-def evaluate(a2t_map, t2a_map, a2t_list, t2a_list):
-    # calc a2t
-    a2t_acc = 0.
-    for i, t_i in enumerate(a2t_list):
-        if a2t_map[i] in t_i:
-            a2t_acc += 1
-    a2t_acc /= len(a2t_list)
-    # calc t2a
-    t2a_acc = 0.
-    for i, a_i in enumerate(t2a_list):
-        if t2a_map[i] in a_i:
-            t2a_acc += 1
-    t2a_acc /= len(t2a_list)
-    return a2t_acc, t2a_acc
 
 
 def ICP_train(text, audio):
     text_copy = np.copy(text)
     audio_copy = np.copy(audio)
-    t2a_m = [i for i in range(len(text))]
-    a2t_m = [i for i in range(len(audio))]
+
     np.random.shuffle(text_copy)
     np.random.shuffle(audio_copy)
 
@@ -118,62 +65,31 @@ def ICP_train(text, audio):
     dim = audio.shape[1]
     a2t_mat = np.identity(dim)
     t2a_mat = np.identity(dim)
-    lr = FLAG.init_lr
-    tmp_text = np.matmul(a2t_mat, np.transpose(audio))
-    tmp_text = np.transpose(tmp_text)
-    tmp_audio = np.matmul(t2a_mat, np.transpose(text))
-    tmp_audio = np.transpose(tmp_audio)
-    t_l = generate_pair_list(text, tmp_text)
-    a_l = generate_pair_list(audio, tmp_audio)
-    a2t_acc, t2a_acc = evaluate(a2t_m, t2a_m, t_l, a_l)
-    print('a2t_acc: {}, t2a_acc: {}'.format(a2t_acc, t2a_acc))
-    print('\n'*5)
-    for i in range(FLAG.max_step):
-        tmp = train_core.get_matrix_and_bias()
-        a2t_mat = np.reshape(np.array(tmp[0]), (dim, dim))
-        t2a_mat = np.reshape(np.array(tmp[2]), (dim, dim))
-        a2t_b = np.reshape(np.array(tmp[1]), (dim))
-        t2a_b = np.reshape(np.array(tmp[3]), (dim))      
+    print('\n')
+    for i in range(10000):
         batch_t2a_text = next(g_text)
         batch_t2a_text_tr = np.transpose(batch_t2a_text)
-        batch_audio = np.transpose(np.matmul(t2a_mat, batch_t2a_text_tr))
-        batch_audio = np.add(batch_audio, t2a_b)
-        batch_t2a_audio = generate_pair(batch_audio, audio)
+        batch_text = np.transpose(np.matmul(t2a_mat, batch_t2a_text_tr))
+        #batch_t2a_audio = generate_pair(batch_text, audio)
         batch_a2t_audio = next(g_audio)
         batch_a2t_audio_tr = np.transpose(batch_a2t_audio)
-        batch_text = np.transpose(np.matmul(a2t_mat, batch_a2t_audio_tr))
-        batch_text = np.add(batch_text, a2t_b)
-        batch_a2t_text = generate_pair(batch_text, text)
-        if (i+1) % 20 == 0:
-            lr *= FLAG.decay_factor
-        end_losses, start_losses = train_core.train(
+        batch_audio = np.transpose(np.matmul(a2t_mat, batch_a2t_audio_tr))
+        batch_a2t_text = generate_pair(batch_audio, text)
+        losses = train_core.train(
             t2a_text=batch_t2a_text,
             t2a_audio=batch_t2a_audio,
             a2t_text=batch_a2t_text,
             a2t_audio=batch_a2t_audio,
-            lr=lr,
-            epoch=FLAG.max_inner_step,
+            lr=FLAG.init_lr,
+            epoch=1,
             )
-
-        print_loss(start_losses, end_losses, i)
-        tmp = train_core.get_matrix_and_bias()
+        print('iter {}:'.format(i))
+        print(losses)
+        # log_str = 'total_loss: {0}, t2a: {1}, a2t:{2}, t2a2t:{3}, a2t2a:{4}'
+        # print(log_str.format(losses))
+        tmp = train_core.get_matrix()
         a2t_mat = np.reshape(np.array(tmp[0]), (dim, dim))
-        t2a_mat = np.reshape(np.array(tmp[2]), (dim, dim))
-        a2t_b = np.reshape(np.array(tmp[1]), (dim))
-        t2a_b = np.reshape(np.array(tmp[3]), (dim))      
-        if i % 20 == 0:
-            tmp_text = np.matmul(a2t_mat, np.transpose(audio))
-            tmp_text = np.transpose(tmp_text)
-            tmp_text = np.add(tmp_text, a2t_b)
-            tmp_audio = np.matmul(t2a_mat, np.transpose(text))
-            tmp_audio = np.transpose(tmp_audio)
-            tmp_audio = np.add(tmp_audio, t2a_b)
-            t_l = generate_pair_list(tmp_text, text)
-            a_l = generate_pair_list(tmp_audio, audio)
-            a2t_acc, t2a_acc = evaluate(a2t_m, t2a_m, t_l, a_l)
-            print('a2t_acc: {}, t2a_acc: {}'.format(a2t_acc, t2a_acc))
-            print('\n'*5)
-    return a2t_mat, t2a_mat
+        t2a_mat = np.reshape(np.array(tmp[1]), (dim, dim))
 
 
 def ICP_train_full(text_t2a, audio_t2a, audio_a2t, text_a2t):
@@ -188,8 +104,8 @@ def ICP_train_full(text_t2a, audio_t2a, audio_a2t, text_a2t):
       t2a_mat: the t2a transform matrix
     '''
 
-    order_t2a = np.arange(text_t2a.shape[0])
-    order_a2t = np.arnage(audio_a2t.shape[0])
+    order_t2a = np.shuffle(np.arange(text_t2a.shape[0]))
+    order_a2t = np.shuffle(np.arnage(audio_a2t.shape[0]))
     np.shuffle(order_t2a)
     np.shuffle(order_a2t)
 
@@ -212,22 +128,20 @@ def ICP_train_full(text_t2a, audio_t2a, audio_a2t, text_a2t):
     g_text_a2t = gen_batch(text_a2t_copy)
     g_text_t2a = gen_batch(text_t2a_copy)
 
-    for i in range(1000):
+    for i in range(100000):
         batch_a2t_audio = next(g_audio_a2t)
         batch_a2t_text = next(g_text_a2t)
         batch_t2a_audio = next(g_audio_t2a)
         batch_t2a_text = next(g_text_t2a)
 
-        end_losses, start_losses = train_core.train(
+        train_core.train(
             t2a_text=batch_t2a_text,
             t2a_audio=batch_t2a_audio,
             a2t_text=batch_a2t_text,
             a2t_audio=batch_a2t_audio,
-            lr=FLAG.init_lr,
-            epoch=FLAG.max_step,
+            lr=FLAG.lr,
+            epoch=1,
             )
-        print_loss(start_losses, end_losses, i)
-
         tmp = train_core.get_matrix()
         a2t_mat = np.reshape(np.array(tmp[0]), (dim, dim))
         t2a_mat = np.reshape(np.array(tmp[1]), (dim, dim))
@@ -241,38 +155,21 @@ def PCA_transform(text, audio):
     return text_pca, audio_pca
 
 
-def gaussian_norm(embs):
-    '''
-    Args:
-      embs: embeddings with shape (num, dim)
-    Return:
-      new_emb: dimensional-wise normalized embeddings
-    '''
-    dim_mean = np.mean(embs, axis=0)
-    dim_std = np.std(embs, axis=0)
-    return (embs-dim_mean)/dim_std
-
-
 def main():
     text_emb, text_labs = dp.read_csv_file(FLAG.text_embeds, ' ')
     audio_emb, audio_labs = dp.read_csv_file(FLAG.audio_embeds, ' ')
-    text_emb = gaussian_norm(text_emb)
-    audio_emb = gaussian_norm(audio_emb)
     text_pca, audio_pca = PCA_transform(text_emb, audio_emb)
-    # normalization both dimension-wise
+
     a2t_mat, t2a_mat = ICP_train(text_pca, audio_pca)
 
     t2a_text = np.transpose(text_pca)
-    tmp_text = np.transpose(np.matmul(t2a_mat, t2a_text))
+    tmp_text = np.matmul(t2a_mat, t2a_text)
 
-    t2a_audio_map = generate_pair(tmp_text, audio_pca)
+    # t2a_audio_map = generate_pair(tmp_text, audio_pca)
 
     a2t_audio = np.transpose(audio_pca)
-    tmp_audio = np.transpose(np.matmul(a2t_mat, a2t_audio))
-    a2t_text_map = generate_pair(tmp_audio, text_pca)
-
-    # text_emb = gaussian_norm(text_emb)
-    # audio_emb = gaussian_norm(audio_emb)
+    tmp_audio = np.matmul(a2t_mat, a2t_audio)
+    # a2t_text_map = generate_pair(tmp_audio, text_pca)
 
     np_audio = np.array(audio_emb)
     t2a_audio_emb = np_audio[t2a_audio_map]
@@ -314,14 +211,8 @@ def addParser():
     parser.add_argument(
         '--max_step',
         type=int,
-        default=80000,
+        default=20000,
         metavar='--<max step>',
-        help='The max step for training')
-    parser.add_argument(
-        '--max_inner_step',
-        type=int,
-        default=500,
-        metavar='--<max step for inner batch>',
         help='The max step for training')
     parser.add_argument(
         'text_embeds',

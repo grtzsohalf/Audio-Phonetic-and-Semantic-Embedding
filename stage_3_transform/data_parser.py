@@ -6,10 +6,10 @@ def read_csv_file(filename, delimiter=' '):
     labs = []
     feats = []
     with open(filename, 'r') as f:
-        for line in f:
-            l_sp = line.rstrip().split(delimiter)
-            labs.append(l_sp[0])
-            feats.append(list(map(float, l_sp[1:])))
+        reader = csv.reader(f, delimiter=delimiter)
+        for row in reader:
+            labs.append(row[0])
+            feats.append(list(map(float, row[1:])))
     return feats, labs
 
 
