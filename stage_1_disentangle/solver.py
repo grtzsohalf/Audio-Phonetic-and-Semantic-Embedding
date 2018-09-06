@@ -139,19 +139,22 @@ class Solver(object):
         d_total_loss_value = 0.
         gp_total_loss_value = 0.
         summary = None
-        for step in tqdm(range(n_batches)):
+        for step in tqdm(range(n_batches+1)):
             start_idx = step * self.batch_size
             end_idx = start_idx + self.batch_size
             feat_indices = feat_order[start_idx:end_idx]
             if step == n_batches:
+                if mode == 'train':
+                    break
                 feat_indices = feat_order[step * self.batch_size:]
-            batch_size = len(feat_indices)
+                batch_size = len(feat_indices)
+                feat_indices = feat_order[len(feat_order)-self.batch_size:]
             # print (feat_indices)
             batch_examples, batch_examples_pos, batch_examples_neg = \
                 batch_pair_data(feats, spk2feat, feat2label, feat_indices, spk_list)
-            batch_examples = batch_examples.reshape((batch_size, self.seq_len, self.feat_dim))
-            batch_examples_pos = batch_examples_pos.reshape((batch_size, self.seq_len, self.feat_dim))
-            batch_examples_neg = batch_examples_neg.reshape((batch_size, self.seq_len, self.feat_dim))
+            batch_examples = batch_examples.reshape((self.batch_size, self.seq_len, self.feat_dim))
+            batch_examples_pos = batch_examples_pos.reshape((self.batch_size, self.seq_len, self.feat_dim))
+            batch_examples_neg = batch_examples_neg.reshape((self.batch_size, self.seq_len, self.feat_dim))
 
             if mode == 'train':
                 start_time = time.time()
@@ -191,7 +194,7 @@ class Solver(object):
 
                 if step % 200 == 0 and step != 0:
                     duration = time.time() - start_time
-                    example_per_sec = batch_size / duration
+                    example_per_sec = self.batch_size / duration
                     format_str = ('%s:epoch %d,step %d,\nr_loss=%.5f,s_pos_loss=%.5f,'
                                   's_neg_loss=%.5f,g_loss=%.5f,d_loss=%.5f,gp_loss=%.5f')
                     print (format_str % (datetime.now(), epoch, step, \
@@ -220,6 +223,10 @@ class Solver(object):
                              feed_dict={self.model.feat: batch_examples,
                                         self.model.feat_pos: batch_examples_pos,
                                         self.model.feat_neg: batch_examples_neg})
+                if step == n_batches:
+                    p_memories = p_memories[self.batch_size-batch_size:]
+                    s_memories = s_memories[self.batch_size-batch_size:]
+                    feat_indices = feat_indices[self.batch_size-batch_size:]
                 self.save_batch_BN(None, None, None, None, phonetic_file, p_memories, s_memories, feat_indices)
             r_total_loss_value += r_loss
             s_pos_total_loss_value += s_pos_loss
