@@ -76,11 +76,11 @@ class Audio2Vec(object):
         return p_enc, p_enc_pos, p_enc_neg, s_enc, s_enc_pos, s_enc_neg
 
     def gradient_penalty(self, W_adv_1, b_adv_1, W_adv_2, b_adv_2,
-                         W_bin, b_bin, p_enc, p_enc_pos, p_enc_neg):
+                         W_bin, b_bin, p_enc_first, p_enc_last, p_enc_pos, p_enc_neg):
         with tf.variable_scope('gradient_penalty') as scope_2_1:
-            alpha = tf.random_uniform(shape=[self.batch_size, 2*self.p_memory_dim], minval=0., maxval=1.)
-            pair_pos_stop = tf.stop_gradient(tf.concat([p_enc, p_enc_pos], 1))
-            pair_neg_stop = tf.stop_gradient(tf.concat([p_enc, p_enc_neg], 1))
+            alpha = tf.random_uniform(shape=[self.batch_size//2, 2*self.p_memory_dim], minval=0., maxval=1.)
+            pair_pos_stop = tf.stop_gradient(tf.concat([p_enc_first, p_enc_pos], 1))
+            pair_neg_stop = tf.stop_gradient(tf.concat([p_enc_last, p_enc_neg], 1))
             pair_hat = alpha * pair_pos_stop + (1 - alpha) * pair_neg_stop
             # pair_hat_norm = tf.contrib.layers.layer_norm(pair_hat)
             pair_hat_l1 = self.leaky_relu(tf.matmul(pair_hat, W_adv_1) + b_adv_1)
@@ -91,15 +91,15 @@ class Audio2Vec(object):
         return GP_loss
 
     def discriminate(self, W_adv_1, b_adv_1, W_adv_2, b_adv_2,
-                     W_bin, b_bin, p_enc, p_enc_pos, p_enc_neg):
+                     W_bin, b_bin, p_enc_first, p_enc_last, p_enc_pos, p_enc_neg):
         with tf.variable_scope('discriminate') as scope_2_2:
-            pair_pos = tf.concat([p_enc, p_enc_pos], 1)
+            pair_pos = tf.concat([p_enc_first, p_enc_pos], 1)
             # pair_pos_norm = tf.contrib.layers.layer_norm(pair_pos)
             pair_pos_l1 = self.leaky_relu(tf.matmul(pair_pos, W_adv_1) + b_adv_1)
             pair_pos_l2 = self.leaky_relu(tf.matmul(pair_pos_l1, W_adv_2) + b_adv_2)
             bin_pos = self.leaky_relu(tf.matmul(pair_pos_l2, W_bin) + b_bin)
 
-            pair_neg = tf.concat([p_enc, p_enc_neg], 1)
+            pair_neg = tf.concat([p_enc_last, p_enc_neg], 1)
             # pair_neg_norm = tf.contrib.layers.layer_norm(pair_neg)
             pair_neg_l1 = self.leaky_relu(tf.matmul(pair_neg, W_adv_1) + b_adv_1)
             pair_neg_l2 = self.leaky_relu(tf.matmul(pair_neg_l1, W_adv_2) + b_adv_2)
@@ -119,12 +119,17 @@ class Audio2Vec(object):
             W_bin = tf.get_variable("bin_w", [self.p_memory_dim/2, 1])
             b_bin = tf.get_variable("bin_b", shape=[1])
 
+            p_enc_first = tf.slice(p_enc, [0, 0], [self.batch_size//2, self.p_memory_dim])
+            p_enc_last = tf.slice(p_enc, [self.batch_size//2, 0], [self.batch_size//2, self.p_memory_dim])
+            p_enc_pos = tf.slice(p_enc_pos, [0, 0], [self.batch_size//2, self.p_memory_dim])
+            p_enc_neg = tf.slice(p_enc_neg, [self.batch_size//2, 0], [self.batch_size//2, self.p_memory_dim])
+
             # WGAN gradient penalty
             GP_loss = self.gradient_penalty(W_adv_1, b_adv_1, W_adv_2, b_adv_2,
-                         W_bin, b_bin, p_enc, p_enc_pos, p_enc_neg)
+                         W_bin, b_bin, p_enc_first, p_enc_last, p_enc_pos, p_enc_neg)
             # discrimination and generation loss
             discrimination_loss = self.discriminate(W_adv_1, b_adv_1, W_adv_2, b_adv_2,
-                     W_bin, b_bin, p_enc, p_enc_pos, p_enc_neg)
+                     W_bin, b_bin, p_enc_first, p_enc_last, p_enc_pos, p_enc_neg)
         return GP_loss, discrimination_loss
 
     def rnn_decode(self, cell, enc_memory):
