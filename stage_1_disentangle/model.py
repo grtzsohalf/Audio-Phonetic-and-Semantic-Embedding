@@ -28,12 +28,17 @@ class Audio2Vec(object):
         # examples_norm = tf.contrib.layers.layer_norm(examples)
         # _, (c, enc_state) = core_rnn.static_rnn(cell, examples, dtype=dtypes.float32)
         with tf.variable_scope("stack_rnn_encoder"):
-            enc_cell = copy.deepcopy(cell)
-            enc_output, enc_state = core_rnn.static_rnn(enc_cell, feat, dtype=dtypes.float32)
-            for i in range(2, self.stack_num):
-                with tf.variable_scope("stack_rnn_encoder_"+str(i)):
-                    enc_cell = copy.deepcopy(cell)
-                    enc_output, enc_state = core_rnn.static_rnn(enc_cell, enc_output, dtype=dtypes.float32)
+            enc_cell_one = copy.deepcopy(cell)
+            enc_cell_two = copy.deepcopy(cell)
+            # enc_output, enc_state = core_rnn.static_rnn(enc_cell, feat, dtype=dtypes.float32)
+            # print (feat.get_shape())
+            enc_output_tuple, enc_state_tuple = tf.nn.bidirectional_dynamic_rnn(enc_cell_one, enc_cell_two, feat, dtype=dtypes.float32)
+            enc_output = tf.concat(enc_output_tuple, -1)
+            enc_state = tf.concat(enc_state_tuple, -1)
+            # for i in range(2, self.stack_num):
+                # with tf.variable_scope("stack_rnn_encoder_"+str(i)):
+                    # enc_cell = copy.deepcopy(cell)
+                    # enc_output, enc_state = core_rnn.static_rnn(enc_cell, enc_output, dtype=dtypes.float32)
         return enc_state
 
     def encode(self, feat, feat_pos, feat_neg):
@@ -48,7 +53,7 @@ class Audio2Vec(object):
             # b_enc_s_2 = tf.get_variable("enc_b_s_2", shape=[self.s_memory_dim])
 
             with tf.variable_scope('encode_p') as scope_1_1:
-                cell = core_rnn.GRUCell(self.p_memory_dim, activation=tf.nn.relu)
+                cell = core_rnn.GRUCell(self.p_memory_dim/2)
                 # cell = tf.contrib.rnn.LayerNormBasicLSTMCell(memory_dim, activation=tf.nn.relu)
                 p_enc = self.rnn_encode(cell, feat)
                 p_enc = self.leaky_relu(tf.matmul(p_enc, W_enc_p) + b_enc_p)
@@ -61,7 +66,7 @@ class Audio2Vec(object):
                 p_enc_neg = self.leaky_relu(tf.matmul(p_enc_neg, W_enc_p) + b_enc_p)
                 # p_enc_neg = self.leaky_relu(tf.matmul(p_enc_neg, W_enc_p_2) + b_enc_p_2)
             with tf.variable_scope('encode_s') as scope_1_2:
-                cell = core_rnn.GRUCell(self.s_memory_dim, activation=tf.nn.relu)
+                cell = core_rnn.GRUCell(self.s_memory_dim/2)
                 # cell = tf.contrib.rnn.LayerNormBasicLSTMCell(memory_dim, activation=tf.nn.relu)
                 s_enc = self.rnn_encode(cell, feat)
                 s_enc = self.leaky_relu(tf.matmul(s_enc, W_enc_s) + b_enc_s)
@@ -163,7 +168,7 @@ class Audio2Vec(object):
 
             dec_state = self.leaky_relu(tf.matmul(tf.concat([p_enc,s_enc], 1), W_dec) + b_dec)
             # dec_state = self.leaky_relu(tf.matmul(dec_state, W_dec_2) + b_dec_2)
-            cell = core_rnn.GRUCell(self.p_memory_dim+self.s_memory_dim, activation=tf.nn.relu)
+            cell = core_rnn.GRUCell(self.p_memory_dim+self.s_memory_dim)
             # cell = tf.contrib.rnn.LayerNormBasicLSTMCell(memory_dim, activation=tf.nn.relu)
             dec_out = self.rnn_decode(cell, dec_state)
         return dec_out
@@ -186,6 +191,7 @@ class Audio2Vec(object):
         zero = tf.constant(0.,dtype=tf.float32)
         where_no_mask = tf.cast(tf.not_equal(labels_trans, zero),dtype=tf.float32)
         dec_proj_outputs_masked = tf.multiply(where_no_mask, dec_proj_outputs)
+        # label_trans = tf.multiply(where_no_mask, label_trans)
         nums = tf.reduce_sum(where_no_mask)
         tmp_loss = tf.subtract(dec_proj_outputs_masked, labels_trans)
         tmp_loss = tf.multiply(tmp_loss, tmp_loss)
@@ -196,9 +202,12 @@ class Audio2Vec(object):
 
     def build_model(self):
         # self.batch_size = tf.shape(self.feat)[0]
-        feat = tf.unstack(tf.transpose (self.feat, perm=[1,0,2]), self.seq_len)
-        feat_pos = tf.unstack(tf.transpose (self.feat_pos, perm=[1,0,2]), self.seq_len)
-        feat_neg = tf.unstack(tf.transpose (self.feat_neg, perm=[1,0,2]), self.seq_len)
+        # feat = tf.unstack(tf.transpose (self.feat, perm=[1,0,2]), self.seq_len)
+        # feat_pos = tf.unstack(tf.transpose (self.feat_pos, perm=[1,0,2]), self.seq_len)
+        # feat_neg = tf.unstack(tf.transpose (self.feat_neg, perm=[1,0,2]), self.seq_len)
+        feat = self.feat
+        feat_pos = self.feat_pos
+        feat_neg = self.feat_neg
 
         # Encode
         p_enc, p_enc_pos, p_enc_neg, s_enc, s_enc_pos, s_enc_neg = \
@@ -238,7 +247,7 @@ class Audio2Vec(object):
             dec_out = self.decode(p_enc, s_enc)
 
         # Reconstruction loss
-        reconstruction_loss = self.rec_loss(dec_out, feat)
+        reconstruction_loss = self.rec_loss(dec_out, tf.unstack(tf.transpose (self.feat, perm=[1,0,2]), self.seq_len))
 
         return reconstruction_loss, generation_loss, discrimination_loss, \
             GP_loss, speaker_loss_pos, speaker_loss_neg, p_enc, s_enc
